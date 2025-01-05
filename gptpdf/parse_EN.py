@@ -10,17 +10,21 @@ from shapely.geometry.base import BaseGeometry
 from shapely.validation import explain_validity
 import concurrent.futures
 
-# This Default Prompt Using Chinese and could be changed to other languages.
+# This Default Prompt can be changed to other languages
 
-DEFAULT_PROMPT = """使用markdown语法，将图片中识别到的文字转换为markdown格式输出。你必须做到：
-1. 输出和使用识别到的图片的相同的语言，例如，识别到英语的字段，输出的内容必须是英语。
-2. 不要解释和输出无关的文字，直接输出图片中的内容。例如，严禁输出 “以下是我根据图片内容生成的markdown文本：”这样的例子，而是应该直接输出markdown。
-3. 内容不要包含在```markdown ```中、段落公式使用 $$ $$ 的形式、行内公式使用 $ $ 的形式、忽略掉长直线、忽略掉页码。
-再次强调，不要解释和输出无关的文字，直接输出图片中的内容。
+DEFAULT_PROMPT = """Use markdown syntax to convert text recognized in images to markdown format output. You must:
+1. Output in the same language as recognized in the image. For example, if English text is detected, the output must be in English.
+2. Do not explain or output irrelevant text, output the image content directly. For example, do not output examples like "Here is the markdown text I generated from the image content:", instead output the markdown directly.
+3. Content should not be wrapped in ```markdown ```, paragraph formulas should use $$ $$ format, inline formulas should use $ $ format, ignore long lines, ignore page numbers and other header/footer content.
+Again, do not explain or output irrelevant text, output the image content directly. Be careful to use the $$ $$ format whenever you 
+output latex.
 """
-DEFAULT_RECT_PROMPT = """图片中用红色框和名称(%s)标注出了一些区域。如果区域是表格或者图片，使用 ![]() 的形式插入到输出内容中，否则直接输出文字内容。
+DEFAULT_RECT_PROMPT = """In the image, some areas are marked with red boxes and names (%s).
+If the area is a table or image, use ![]() format to insert the name into the output content,
+otherwise output the text content directly.
 """
-DEFAULT_ROLE_PROMPT = """你是一个PDF文档解析器，使用markdown和latex语法输出图片的内容。
+DEFAULT_ROLE_PROMPT = """You are a PDF document parser, output the image content 
+using markdown and latex syntax. Make a faithful word-forreproduction - do not summarise, do not rewrite, include everything.
 """
 
 
@@ -95,37 +99,37 @@ def _parse_rects(page: fitz.Page) -> List[Tuple[float, float, float, float]]:
     Parse drawings in the page and merge adjacent rectangles.
     """
 
-    # 提取画的内容
+    # Extract drawn content
     drawings = page.get_drawings()
 
-    # 忽略掉长度小于30的水平直线
+    # Ignore horizontal lines shorter than 30
     is_short_line = lambda x: abs(x['rect'][3] - x['rect'][1]) < 1 and abs(x['rect'][2] - x['rect'][0]) < 30
     drawings = [drawing for drawing in drawings if not is_short_line(drawing)]
 
-    # 转换为shapely的矩形
+    # Convert to shapely rectangles
     rect_list = [sg.box(*drawing['rect']) for drawing in drawings]
 
-    # 提取图片区域
+    # Extract image areas
     images = page.get_image_info()
     image_rects = [sg.box(*image['bbox']) for image in images]
 
-    # 合并drawings和images
+    # Merge drawings and images
     rect_list += image_rects
 
     merged_rects = _merge_rects(rect_list, distance=10, horizontal_distance=100)
     merged_rects = [rect for rect in merged_rects if explain_validity(rect) == 'Valid Geometry']
 
-    # 将大文本区域和小文本区域分开处理: 大文本相小合并，小文本靠近合并
+    # Process large and small text areas separately: merge large text with small, merge nearby small text
     is_large_content = lambda x: (len(x[4]) / max(1, len(x[4].split('\n')))) > 5
     small_text_area_rects = [sg.box(*x[:4]) for x in page.get_text('blocks') if not is_large_content(x)]
     large_text_area_rects = [sg.box(*x[:4]) for x in page.get_text('blocks') if is_large_content(x)]
-    _, merged_rects = _adsorb_rects_to_rects(large_text_area_rects, merged_rects, distance=0.1) # 完全相交
-    _, merged_rects = _adsorb_rects_to_rects(small_text_area_rects, merged_rects, distance=5) # 靠近
+    _, merged_rects = _adsorb_rects_to_rects(large_text_area_rects, merged_rects, distance=0.1) # Complete intersection
+    _, merged_rects = _adsorb_rects_to_rects(small_text_area_rects, merged_rects, distance=5) # Nearby
 
-    # 再次自身合并
+    # Merge with self again
     merged_rects = _merge_rects(merged_rects, distance=10)
 
-    # 过滤比较小的矩形
+    # Filter out small rectangles
     merged_rects = [rect for rect in merged_rects if rect.bounds[2] - rect.bounds[0] > 20 and rect.bounds[3] - rect.bounds[1] > 20]
 
     return [rect.bounds for rect in merged_rects]
@@ -135,7 +139,7 @@ def _parse_pdf_to_images(pdf_path: str, output_dir: str = './') -> List[Tuple[st
     """
     Parse PDF to images and save to output_dir.
     """
-    # 打开PDF文件
+    # Open PDF file
     pdf_document = fitz.open(pdf_path)
     image_infos = []
 
@@ -145,32 +149,25 @@ def _parse_pdf_to_images(pdf_path: str, output_dir: str = './') -> List[Tuple[st
         rects = _parse_rects(page)
         for index, rect in enumerate(rects):
             fitz_rect = fitz.Rect(rect)
-
-            # 保存页面为图片
+            # Save page as image
             pix = page.get_pixmap(clip=fitz_rect, matrix=fitz.Matrix(4, 4))
             name = f'{page_index}_{index}.png'
             pix.save(os.path.join(output_dir, name))
             rect_images.append(name)
-
-            #  在页面上绘制红色矩形
+            # Draw red rectangle on page
             big_fitz_rect = fitz.Rect(fitz_rect.x0 - 1, fitz_rect.y0 - 1, fitz_rect.x1 + 1, fitz_rect.y1 + 1)
-            
-            # 清除矩形内的内容
-            page.draw_rect(fitz_rect, color=(1, 1, 1), fill=(1, 1, 1))
-
-            # 绘制红色空心矩形边框
-            page.draw_rect(big_fitz_rect, color=(1, 0, 0), width=1) 
-
-            # 在矩形内的左上角写上矩形的索引name，添加一些偏移量
+            # Hollow rectangle
+            page.draw_rect(big_fitz_rect, color=(1, 0, 0), width=1)
+            # Draw rectangle area (solid)
+            # page.draw_rect(big_fitz_rect, color=(1, 0, 0), fill=(1, 0, 0))
+            # Write rectangle index name in the top left corner, with some offset
             text_x = fitz_rect.x0 + 2
             text_y = fitz_rect.y0 + 10
             text_rect = fitz.Rect(text_x, text_y - 9, text_x + 80, text_y + 2)
-
-            # 绘制白色背景矩形
+            # Draw white background rectangle
             page.draw_rect(text_rect, color=(1, 1, 1), fill=(1, 1, 1))
-            # 插入带有白色背景的文字
+            # Insert text with white background
             page.insert_text((text_x, text_y), name, fontsize=10, color=(1, 0, 0))
-
         page_image_with_rects = page.get_pixmap(matrix=fitz.Matrix(3, 3))
         page_image = os.path.join(output_dir, f'{page_index}.png')
         page_image_with_rects.save(page_image)
@@ -194,92 +191,3 @@ def _gpt_parse_images(
     """
     Parse images to markdown content.
     """
-    from GeneralAgent import Agent
-
-    if isinstance(prompt_dict, dict) and 'prompt' in prompt_dict:
-        prompt = prompt_dict['prompt']
-        logging.info("prompt is provided, using user prompt.")
-    else:
-        prompt = DEFAULT_PROMPT
-        logging.info("prompt is not provided, using default prompt.")
-    if isinstance(prompt_dict, dict) and 'rect_prompt' in prompt_dict:
-        rect_prompt = prompt_dict['rect_prompt']
-        logging.info("rect_prompt is provided, using user prompt.")
-    else:
-        rect_prompt = DEFAULT_RECT_PROMPT
-        logging.info("rect_prompt is not provided, using default prompt.")
-    if isinstance(prompt_dict, dict) and 'role_prompt' in prompt_dict:
-        role_prompt = prompt_dict['role_prompt']
-        logging.info("role_prompt is provided, using user prompt.")
-    else:
-        role_prompt = DEFAULT_ROLE_PROMPT
-        logging.info("role_prompt is not provided, using default prompt.")
-
-    def _process_page(index: int, image_info: Tuple[str, List[str]]) -> Tuple[int, str]:
-        logging.info(f'gpt parse page: {index}')
-        agent = Agent(role=role_prompt, api_key=api_key, base_url=base_url, disable_python_run=True, model=model, **args)
-        page_image, rect_images = image_info
-        local_prompt = prompt
-        if rect_images:
-            local_prompt += rect_prompt + ', '.join(rect_images)
-        content = agent.run([local_prompt, {'image': page_image}], display=verbose)
-        return index, content
-
-    contents = [None] * len(image_infos)
-    with concurrent.futures.ThreadPoolExecutor(max_workers=gpt_worker) as executor:
-        futures = [executor.submit(_process_page, index, image_info) for index, image_info in enumerate(image_infos)]
-        for future in concurrent.futures.as_completed(futures):
-            index, content = future.result()
-
-            # 在某些情况下大模型还是会输出 ```markdown ```字符串
-            if '```markdown' in content:
-                content = content.replace('```markdown\n', '')
-                last_backticks_pos = content.rfind('```')
-                if last_backticks_pos != -1:
-                    content = content[:last_backticks_pos] + content[last_backticks_pos + 3:]
-
-            contents[index] = content
-
-    output_path = os.path.join(output_dir, 'output.md')
-    with open(output_path, 'w', encoding='utf-8') as f:
-        f.write('\n\n'.join(contents))
-
-    return '\n\n'.join(contents)
-
-
-def parse_pdf(
-        pdf_path: str,
-        output_dir: str = './',
-        prompt: Optional[Dict] = None,
-        api_key: Optional[str] = None,
-        base_url: Optional[str] = None,
-        model: str = 'gpt-4o',
-        verbose: bool = False,
-        gpt_worker: int = 1,
-        **args
-) -> Tuple[str, List[str]]:
-    """
-    Parse a PDF file to a markdown file.
-    """
-    if not os.path.exists(output_dir):
-        os.makedirs(output_dir)
-
-    image_infos = _parse_pdf_to_images(pdf_path, output_dir=output_dir)
-    content = _gpt_parse_images(
-        image_infos=image_infos,
-        output_dir=output_dir,
-        prompt_dict=prompt,
-        api_key=api_key,
-        base_url=base_url,
-        model=model,
-        verbose=verbose,
-        gpt_worker=gpt_worker,
-        **args
-    )
-
-    all_rect_images = []
-    all_page_images = []
-    for page_image, rect_images in image_infos:
-        all_page_images.append(page_image)
-        all_rect_images.extend(rect_images)
-    return content, all_page_images, all_rect_images

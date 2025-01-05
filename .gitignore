@@ -1,7 +1,8 @@
-test/.env
+**/.env
 gp/*
 *.pyc
 dist/*
 .idea
 venv
 test_output
+work/*

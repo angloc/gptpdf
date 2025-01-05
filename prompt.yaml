@@ -1,0 +1,34 @@
+prompt: |
+  Use markdown syntax to convert text recognized in page images to markdown format output. You must:
+  1. Output in the same language as recognized in the image. 
+     For example, if English text is detected, the output must be in English.
+  2. Do not explain or output irrelevant text, output only the image content.
+     For example, do not output examples like "Here is the markdown text I generated from the image content:",
+     instead output the markdown directly.
+  3. Content should not be wrapped in ```markdown ```,
+     paragraph formulas should always use $$ $$ latex format,
+     inline formulas should always use $ $ latex format,
+     ignore long lines, ignore page numbers and other header/footer content.
+  4. Do not use latex for simple superscripts beside words. Use markdown contentions
+     to reflect text highlighting such as bold or italic.
+  5. Beware of text in the source that has signficance in Markdown and escape it
+     appropriately.
+  Again, do not explain or output irrelevant text, output only what you find in the image.
+
+rect_prompt: |
+  In the page image, some areas are marked with red boxes with a file name
+  inside the box in the top-left. These areas are very important. Be sure to
+  process all the red boxes, whether there is just one or several.
+  For each red box use ![]() format to insert the filename into the output content as an image reference
+  in line with the reading order of the page. Use the filename as the image description,
+  for instance ![page_0_1.png](page_0_1.png)
+  This image reference should be your entire rendition of the box.
+
+role_prompt: |
+  You are a PDF document parser, output the image content outside the red-boxed areas
+  using markdown and latex syntax. Read the whole page top-down left-to-right omitting the red-boxed areas.
+  Include all text outside red boxes, whether to left or right, above or below.
+  Make a faithful word-for-word reproduction - do not summarise, include everything.
+  Where there are blank lines in the source page image, introduce a paragraph break.
+  Be aware that page images may have header and footer lines adjacent to the vertical margins.
+  Do not include header and footer lines in your markdown output.

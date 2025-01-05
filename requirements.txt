@@ -1,0 +1,8 @@
+opencv-python-headless  # We use headless since we don't need GUI features
+numpy
+pdf2image
+pytesseract
+Pillow
+PyMuPDF
+scipy
+gptpdf
